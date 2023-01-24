@@ -17,10 +17,6 @@ templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 auth_handler = AuthHandler()
 
-
-users = []
-
-
 def get_auth_handler():
     return auth_handler
 
@@ -31,6 +27,10 @@ def register(request: Request):
 
 @app.post('/register', status_code=201)
 async def register(response: Response, request: Request):
+    """
+        register user it's only work with template
+        it's give username and password and create stripe_id and store to db
+    """
     form = await request.form()
     username = form.get('username') 
     password = form.get('password')
@@ -42,13 +42,9 @@ async def register(response: Response, request: Request):
     if len(errors) > 0:
         return {'error' : errors}
 
-    if any(i['username'] == username for i in users):
+    if any(i.username == username for i in User.objects.all()):
         raise HTTPException(status_code=400, detail='Uesrname is Taken')
     hashed_password = auth_handler.get_password_hash(password)
-    users.append({
-        'username' : username,
-        'password': hashed_password
-    })
     customer = stripe.Customer.create(
             description="Demo customer",
     )
@@ -62,6 +58,10 @@ def index(request: Request):
 
 @app.post('/login')
 async def login(response: Response, request: Request):
+    """"
+        it's only work with form
+        if it's successful it store access_token to cookie
+    """
     form = await request.form()
     username = form.get('username') 
     password = form.get('password')
@@ -81,7 +81,7 @@ async def login(response: Response, request: Request):
         raise HTTPException(status_code=401, detail='Invalid username and/or password')
     token = auth_handler.encode_token(user_.username)
     msg = "login succssful"
-    response = templates.TemplateResponse('index2.html', {'request':request, 'msg':msg})
+    response = templates.TemplateResponse('login.html', {'request':request, 'msg':msg})
 
     response.set_cookie(key="access_token", value=f"Bearer {token}", httponly=True)
     return response
@@ -91,7 +91,6 @@ async def login(response: Response, request: Request):
 def index(request: Request):
     token = request.cookies.get('access_token')
     if token is None:
-        # return templates.TemplateResponse("login.html", {"request": request})
         return {'detail' : 'go to /login'}
     return templates.TemplateResponse("index2.html", {"request": request})
 
@@ -108,23 +107,17 @@ async def cancel(request: Request):
 
 @app.post("/create-checkout-session")
 async def create_checkout_session(request: Request):
+    """
+        if payment successful it's create session
+    """
     data = await request.json()
     print(request.cookies.get('access_token')) 
-    # User.objects.get()   
     token = request.cookies.get('access_token')
     if token is None:
         return templates.TemplateResponse("login.html", {"request": request})
     username = auth_handler.decode_token(token.split(' ')[1])
-    # print('ffffffff', f, type(f))
     user = User.objects.get(username=username)
     
-    # if not app.state.stripe_customer_id:
-    #     customer = stripe.Customer.create(
-    #         description="Demo customer",
-    #     )
-    #     print('customer_id=', customer['id'])
-    #     app.state.stripe_customer_id = customer["id"]
-
     checkout_session = stripe.checkout.Session.create(
         customer=user.stripe_id,
         success_url="http://176.123.2.161:5022/success?session_id={CHECKOUT_SESSION_ID}",
@@ -141,6 +134,9 @@ async def create_checkout_session(request: Request):
 
 @app.post("/webhook")
 async def webhook_received(request: Request, stripe_signature: str = Header(None)):
+    """
+        it's work with webhook and get information that made after stripe event occure
+    """
     webhook_secret = 'whsec_4f257b756ff31b76059e8b9e6364efd8bf0fbd4cafbd82b50505cc478e80e8e4'
     data = await request.body()
     try:
@@ -154,9 +150,6 @@ async def webhook_received(request: Request, stripe_signature: str = Header(None
         return {"error": str(e)}
 
     event_type = event['type']
-    # print('--------' * 4)
-    # print('event=', event['data']['object'])
-    # print('event=', event['data']['object'])
     if event_type == 'invoice.paid':
         print('--------' * 4)
         data = event['data']['object']
@@ -179,6 +172,9 @@ async def webhook_received(request: Request, stripe_signature: str = Header(None
 
 @app.get('/get-user-info')
 def user_info():
+    """
+        get all user information that register
+    """
     lst = []
     for i in User.objects.all():
         lst.append({
@@ -189,6 +185,9 @@ def user_info():
 
 @app.get('/get-payment-info')
 def get_payment_info():
+    """
+        get all payment occur
+    """
     lst = []
     for i in Payment.objects.all():
         lst.append({
@@ -199,21 +198,7 @@ def get_payment_info():
         })
     return {'data': lst}
 
-@app.get('/test')
-def test(response: Response, request: Request):
-    print(request.cookies.get('access_token'))
-    return {request.cookies.get('access_token')}
 
 
-@app.get('/unprotected')
-def unprotected():
-    return { 'hello': 'world' }
 
-@app.get('/test-auth', dependencies=[Depends(JWTBearer())])
-def protected2():
-    return { 'name': 'test' }
-
-@app.get('/protected')
-def protected(username=Depends(auth_handler.auth_wrapper)):
-    return { 'name': username }
 
